@@ -634,12 +634,12 @@ public class FSharpGenerator extends SourceGenerator {
 			for(int i = 0; i < argsNode.size(); i++){
 				arg = argsNode.get(i);
 				argsStr += " " + arg.getText();
-				this.currentBuilder.appendNewLine("static let _" + arg.getText() + "_middle = ref None");
+				this.currentBuilder.appendNewLine("let _" + arg.getText() + "_middle = ref None");
 			}
 			if(fs.recursive){
-				this.currentBuilder.appendNewLine("static let rec _" + fs.name + argsStr + " =");
+				this.currentBuilder.appendNewLine("let rec _" + fs.name + argsStr + " =");
 			} else {
-				this.currentBuilder.appendNewLine("static member " + fs.name + argsStr + " =");
+				this.currentBuilder.appendNewLine("member " + fs.name + argsStr + " =");
 			}
 			this.currentBuilder.indent();
 			for(int i = 0; i < argsNode.size(); i++){
@@ -663,23 +663,15 @@ public class FSharpGenerator extends SourceGenerator {
 			}
 			this.currentBuilder.unIndent();
 			if(fs.recursive){
-				this.currentBuilder.appendNewLine("static member " + fs.name + argsStr + " = _" + fs.name + argsStr);
+				this.currentBuilder.appendNewLine("member " + fs.name + argsStr + " = _" + fs.name + argsStr);
 			}
 		}
 		for(FSharpFunc ff : fs.funcList){
-			if(fs.type == FSharpScope.ScopeType.OBJECT){
-				this.currentBuilder.appendNewLine("member this." + ff.name + " " + ff.argsStr + " = ScopeOf" + fs.getFullname() + "_" + ff.name + "." + ff.name + " " + ff.argsStr);
-			} else {
-				this.currentBuilder.appendNewLine("static member " + ff.name + " " + ff.argsStr + " = ScopeOf" + fs.getFullname() + "_" + ff.name + "." + ff.name + " " + ff.argsStr);
-			}
+			this.currentBuilder.appendNewLine("member this." + ff.name + " " + ff.argsStr + " = ScopeOf" + fs.getFullname() + "_" + ff.name + "." + ff.name + " " + ff.argsStr);
 		}
 		for(int i = fs.numOfArgs; i < fs.varList.size(); i++){
 			fv = fs.varList.get(i);
-			if(fs.type == FSharpScope.ScopeType.OBJECT){
-				this.currentBuilder.appendNewLine("member this.g_" + fv.getTrueName() + " = " + fv.getTrueName());
-			} else {
-				this.currentBuilder.appendNewLine("static member g_" + fv.getTrueName() + " = " + fv.getTrueName());
-			}
+			this.currentBuilder.appendNewLine("member this.g_" + fv.getTrueName() + " = " + fv.getTrueName());
 		}
 		
 		this.currentBuilder.appendNewLine("end");
@@ -694,12 +686,6 @@ public class FSharpGenerator extends SourceGenerator {
 		for(int i = 1; i < this.scopeList.size(); i++){
 			this.generateScope(this.scopeList.get(i), false);
 		}
-//		for(ParsingObject element : node){
-//			if(element.is(MillionTag.TAG_VAR_DECL) || element.is(MillionTag.TAG_VAR_DECL_STMT) || element.is(MillionTag.TAG_FUNC_DECL)){
-//				this.currentBuilder.appendNewLine();
-//				this.visit(element);
-//			}
-//		}
 		this.generateTypeCode();
 	}
 	
