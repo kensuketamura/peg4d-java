@@ -33,21 +33,28 @@ public class FSharpGenerator extends SourceGenerator {
 	
 	protected void initialSetting(ParsingObject node){
 		ParsingObject target;
+		FSharpScope topScope = new FSharpScope("TOPLEVEL", node, new ArrayList<String>());
+		this.scopeList.add(topScope);
 		for(int i = 0; i < node.size(); i++){
 			target = node.get(i);
 			if(target.is(MillionTag.TAG_VAR_DECL_STMT)){
 				
 			}
-			this.findScope(target, new ArrayList<String>());
+			this.findScope(target, new ArrayList<String>(), topScope);
+		}
+		for(FSharpScope fs : this.scopeList){
+			this.checkPrototype(node, fs);
 		}
 	}
 	
-	protected void findScope(ParsingObject node, ArrayList<String> path){
+	protected void findScope(ParsingObject node, List<String> path, FSharpScope parentScope){
 		boolean addScope = false;
 		String scopeName = "";
-		ArrayList<String> nextPath = path;
+		ArrayList<String> nextPath = (ArrayList<String>)path;
 		boolean isFuncDecl = node.is(MillionTag.TAG_FUNC_DECL);
 		boolean isObject = node.is(MillionTag.TAG_OBJECT);
+		FSharpScope fs = parentScope;
+		List<String> prototypePath = null;
 		
 		if(isFuncDecl){
 			addScope = true;
@@ -57,7 +64,23 @@ public class FSharpGenerator extends SourceGenerator {
 				ParsingObject sNode = node.getParent();
 				ParsingObject ssNode = sNode.getParent();
 				ParsingObject sssNode = ssNode.getParent();
-				if(sssNode.is(MillionTag.TAG_VAR_DECL_STMT)){
+				if(sNode.is(MillionTag.TAG_ASSIGN)){
+					scopeName = sNode.get(0).get(1).getText();
+					prototypePath = new ArrayList<String>();
+					for(String pathElement : this.getFullFieldText(sNode.get(0), fs).split("_")){
+						prototypePath.add(pathElement);
+					}
+					FSharpScope prototypeScope = this.searchScopeFromList(prototypePath.get(0));
+					nextPath = new ArrayList<String>();
+					if(prototypeScope != null){
+						nextPath.addAll(prototypeScope.path);
+					}
+					for(int i = 0; i < prototypePath.size() - 1; i++){
+						nextPath.add(prototypePath.get(i));
+					}
+				} else if(sNode.is(MillionTag.TAG_APPLY)){
+					scopeName = ssNode.get(0).getText();
+				} else if(sssNode.is(MillionTag.TAG_VAR_DECL_STMT)){
 					scopeName = sNode.get(0).getText();
 				} else if(sNode.is(MillionTag.TAG_PROPERTY)) {
 					scopeName = sNode.get(0).getText();
@@ -87,21 +110,29 @@ public class FSharpGenerator extends SourceGenerator {
 					fullName += pathElement + "_";
 				}
 				fullName += lambdaName;
-				nameNode.setValue("ScopeOf" + fullName + "." + lambdaName);
+				nameNode.setValue("(new ScopeOf" + fullName + "())." + lambdaName);
 				parent.insert(this.indexOf(node), nameNode);
 				parent.remove(this.indexOf(node));
 			}
 		} else if(isObject){
 			addScope = true;
 			ParsingObject sNode = node.getParent();
-			if(sNode.is(MillionTag.TAG_VAR_DECL)){
+			if(sNode.is(MillionTag.TAG_ASSIGN) || sNode.is(MillionTag.TAG_VAR_DECL)){
 				scopeName = sNode.get(0).getText();
 			} else {
 				scopeName = "lambda" + this.lambdaKey++;
 			}
 		}
 		if(addScope){
-			FSharpScope fs = new FSharpScope(scopeName, node, path);
+			if(prototypePath == null){
+				fs = new FSharpScope(scopeName, node, (ArrayList<String>)path);
+			} else {
+				fs = new FSharpScope(scopeName, node, nextPath);
+			}
+			if(parentScope != null){
+				fs.parent = parentScope;
+				parentScope.add(fs);
+			}
 			this.scopeList.add(fs);
 			
 			if(isFuncDecl){
@@ -121,13 +152,14 @@ public class FSharpGenerator extends SourceGenerator {
 				node.getParent().remove(node);
 			}
 			
-			nextPath = new ArrayList<String>();
-			//deep copy path -> cpath
-			for(String pathElement : path){
-				nextPath.add(pathElement);
+			if(prototypePath == null){
+				nextPath = new ArrayList<String>();
+				//deep copy path -> cpath
+				for(String pathElement : path){
+					nextPath.add(pathElement);
+				}
+				nextPath.add(scopeName);
 			}
-			nextPath.add(scopeName);
-			
 			if(isFuncDecl){
 				this.checkVarDecl(node.get(6), fs);
 			} else if(isObject){
@@ -136,8 +168,38 @@ public class FSharpGenerator extends SourceGenerator {
 		}
 		if(node.size() > 0){
 			for(int i = 0; i < node.size(); i++){
-				this.findScope(node.get(i), nextPath);
+				this.findScope(node.get(i), nextPath, fs);
 			}
+		}
+	}
+	
+	private ParsingObject lastNodeOfField(ParsingObject node){
+		if(node.getParent().is(MillionTag.TAG_FIELD)){
+			return this.lastNodeOfField(node.getParent());
+		} else if(node.is(MillionTag.TAG_FIELD)){
+			return node.get(1);
+		}
+		return null;
+	}
+	
+	private void checkPrototype(ParsingObject node, FSharpScope fs){
+		ParsingObject parent = node.getParent();
+		if(node.is(MillionTag.TAG_NAME) && parent.is(MillionTag.TAG_FIELD) && node.getText().contentEquals("prototype")){
+			int node_i = this.indexOf(node);
+			if(0 < node_i){
+				if(parent.get(node_i - 1).getText().contentEquals(fs.name)){
+					ParsingObject pNameNode = this.lastNodeOfField(node);
+					String prototypeName = pNameNode.getText();
+					ParsingObject valueNode = pNameNode.getParent().getParent().get(1);
+					if(valueNode.is(MillionTag.TAG_FUNC_DECL)){
+						valueNode.get(2).setValue(prototypeName);
+					}
+					fs.funcList.add(new FSharpFunc(prototypeName, fs.getPathName(), false, valueNode));
+				}
+			}
+		}
+		for(int i = 0; i < node.size(); i++){
+			checkPrototype(node.get(i), fs);
 		}
 	}
 	
@@ -148,7 +210,7 @@ public class FSharpGenerator extends SourceGenerator {
 	private int indexOf(ParsingObject node){
 		ParsingObject parent = node.getParent();
 		for(int i = 0; i < parent.size(); i++){
-			if(parent.get(i).equals(node)){
+			if(parent.get(i) == node){
 				return i;
 			}
 		}
@@ -207,17 +269,19 @@ public class FSharpGenerator extends SourceGenerator {
 			return false;
 		} else
 		if(node.is(MillionTag.TAG_ASSIGN)){
-			String varName = this.getFieldText(node.get(0));
-			boolean isExist = false;
-			for(FSharpVar searchTarget : fs.varList){
-				if(searchTarget.name.contentEquals(varName)){
-					isExist = true;
+			if(node.get(0).is(MillionTag.TAG_NAME)){
+				String varName = this.getFieldText(node.get(0));
+				boolean isExist = false;
+				for(FSharpVar searchTarget : fs.varList){
+					if(searchTarget.name.contentEquals(varName)){
+						isExist = true;
+					}
 				}
-			}
-			if(!isExist){
-				FSharpVar fv = new FSharpVar(varName, fs.getPathName());
-				this.varList.add(fv);
-				fs.varList.add(fv);
+				if(!isExist){
+					FSharpVar fv = new FSharpVar(varName, fs.getPathName());
+					this.varList.add(fv);
+					fs.varList.add(fv);
+				}
 			}
 		}
 		if(node.size() > 0){
@@ -371,6 +435,17 @@ public class FSharpGenerator extends SourceGenerator {
 			}
 		}
 		return null;
+	}
+	
+	private String getFullFieldText(ParsingObject node, FSharpScope fs){
+		if(node.is(MillionTag.TAG_FIELD)){
+			if(node.get(1).getText().contentEquals("prototype")){
+				return this.getFullFieldText(node.get(0), fs);
+			} else {
+				return this.getFullFieldText(node.get(0), fs) + "_" + node.get(1).getText();
+			}
+		}
+		return node.getText();
 	}
 	
 	protected String getFieldText(ParsingObject node){
@@ -615,18 +690,7 @@ public class FSharpGenerator extends SourceGenerator {
 		
 		this.currentBuilder.indent();
 		FSharpVar fv;
-		this.letFlag = true;
-		for(int i = fs.numOfArgs; i < fs.varList.size(); i++){
-			fv = fs.varList.get(i);
-			if(fv.initialValue == null){
-				this.currentBuilder.appendNewLine("static let " + fv.getTrueName() + " = ref None");
-			} else {
-				this.currentBuilder.appendNewLine("static let " + fv.getTrueName() + " = ref (Some(");
-				this.visit(fv.initialValue);
-				this.currentBuilder.append("))");
-			}
-		}
-		this.letFlag = false;
+
 		if(fs.node.is(MillionTag.TAG_FUNC_DECL)){
 			ParsingObject argsNode = fs.node.get(4);
 			ParsingObject arg;
@@ -639,7 +703,7 @@ public class FSharpGenerator extends SourceGenerator {
 			if(fs.recursive){
 				this.currentBuilder.appendNewLine("let rec _" + fs.name + argsStr + " =");
 			} else {
-				this.currentBuilder.appendNewLine("member " + fs.name + argsStr + " =");
+				this.currentBuilder.appendNewLine("member self." + fs.name + argsStr + " =");
 			}
 			this.currentBuilder.indent();
 			for(int i = 0; i < argsNode.size(); i++){
@@ -663,17 +727,39 @@ public class FSharpGenerator extends SourceGenerator {
 			}
 			this.currentBuilder.unIndent();
 			if(fs.recursive){
-				this.currentBuilder.appendNewLine("member " + fs.name + argsStr + " = _" + fs.name + argsStr);
+				this.currentBuilder.appendNewLine("member self." + fs.name + argsStr + " = _" + fs.name + argsStr);
 			}
 		}
-		for(FSharpFunc ff : fs.funcList){
-			this.currentBuilder.appendNewLine("member this." + ff.name + " " + ff.argsStr + " = ScopeOf" + fs.getFullname() + "_" + ff.name + "." + ff.name + " " + ff.argsStr);
-		}
+//		for(FSharpScope child : fs.children){
+//			this.currentBuilder.appendNewLine("member self." + child.getFullname() + "= new " + child.getScopeName() + "()");
+//		}
+//		FSharpScope parentScope = fs.parent;
+//		while(parentScope != null){
+//			this.currentBuilder.appendNewLine("member self." + parentScope.name + "= new " + parentScope.getScopeName() + "()");
+//			parentScope = parentScope.parent;
+//		}
+		this.letFlag = true;
 		for(int i = fs.numOfArgs; i < fs.varList.size(); i++){
 			fv = fs.varList.get(i);
-			this.currentBuilder.appendNewLine("member this.g_" + fv.getTrueName() + " = " + fv.getTrueName());
+			if(fv.initialValue == null){
+				this.currentBuilder.appendNewLine("member self." + fv.getTrueName() + " = ref None");
+			} else {
+				this.currentBuilder.appendNewLine("member self." + fv.getTrueName() + " = ref (Some(");
+				ParsingObject initParentNode = fv.initialValue.getParent();
+				int initIndex = this.indexOf(fv.initialValue);
+				this.formatRightSide(fv.initialValue);
+				this.visit(initParentNode.get(initIndex));
+				this.currentBuilder.append("))");
+			}
 		}
-		
+		this.letFlag = false;
+		for(FSharpFunc ff : fs.funcList){
+			this.currentBuilder.appendNewLine("member self." + ff.name + " " + ff.argsStr + " = (new ScopeOf" + fs.getFullname() + "_" + ff.name + "())." + ff.name + " " + ff.argsStr);
+		}
+//		for(int i = fs.numOfArgs; i < fs.varList.size(); i++){
+//			fv = fs.varList.get(i);
+//			this.currentBuilder.appendNewLine("member self.g_" + fv.getTrueName() + " = self." + fv.getTrueName());
+//		}
 		this.currentBuilder.appendNewLine("end");
 		this.currentBuilder.unIndent();
 		this.prefixName = "";
@@ -699,7 +785,12 @@ public class FSharpGenerator extends SourceGenerator {
 				for(FSharpVar fv : targetScope.varList){
 					if(fv == targetVar && targetScope != this.currentScope){
 						fs = targetScope;
-						this.currentBuilder.append(fs.getScopeName() + ".g_" + node.getText());
+						this.currentBuilder.append("(new " + fs.getScopeName() + "())." + node.getText());
+						break;
+					} else if(fv == targetVar && targetScope == this.currentScope && !this.currentScope.isArgumentVar(fv.getTrueName())){
+						fs = targetScope;
+						this.currentBuilder.append("self." + node.getText());
+						break;
 					}
 				}
 			}
@@ -1049,16 +1140,16 @@ public class FSharpGenerator extends SourceGenerator {
 			FSharpScope fs;
 			FSharpVar targetVar = null;
 			for(int i = 0; i < node.size()-1; i++){
-				fs = this.searchScopeFromList(node.get(i).getText());
+				fs = this.currentScope.getAvailableScope(node.get(i).getText());
 				if(fs != null){
-					fieldValue += fs.getScopeName() + ".";
+					fieldValue += "(new " + fs.getScopeName() + "()).";
 					targetVar = fs.searchVar(node.get(node.size()-1).getText());
 				}
 				fs = null;
 			}
 			
 			if(targetVar != null){
-				fieldValue += "g_" + targetVar.getTrueName() + ")).Value";
+				fieldValue += targetVar.getTrueName() + ")).Value";
 			} else {
 				fieldValue += node.get(0).getText() + ")).Value";
 			}
@@ -1077,19 +1168,26 @@ public class FSharpGenerator extends SourceGenerator {
 			if(!node.getParent().is(MillionTag.TAG_FIELD)){
 				FSharpVar targetVar = searchVarFromList(name, false);
 				FSharpScope fs = null;
+				if(targetVar == null){
+					targetVar = this.currentScope.getAvailableVar(name);
+				}
 				if(targetVar != null){
 					name = targetVar.getTrueName();
+					String trueName = name;
 					for(FSharpScope targetScope : this.scopeList){
 						for(FSharpVar fv : targetScope.varList){
 							if(fv == targetVar && targetScope != this.currentScope){
 								fs = targetScope;
-								name = fs.getScopeName() + ".g_" + name;
+								name = "(new " + fs.getScopeName() + "())." + name;
 							}
 						}
 					}
+					if(this.currentScope.searchVar(trueName) != null && !this.currentScope.isArgumentVar(trueName)){
+						name = "self." + name;
+					}
 					node.setValue("(!(" + name + ")).Value");
 				} else {
-					FSharpScope tScope = this.searchScopeFromList(name);
+					FSharpScope tScope = this.currentScope.getAvailableScope(name);
 					if(tScope != null){
 						node.setValue("new " + tScope.getScopeName() + "()");
 					}
@@ -1305,18 +1403,20 @@ public class FSharpGenerator extends SourceGenerator {
 			ParsingObject field;
 			FSharpScope fs;
 			String fieldValue = "";
-			for(int i = 0; i < node.size() - 1; i++){
-				field = node.get(i);
-				if(field.is(MillionTag.TAG_APPLY)){
-					this.formatApplyFuncName(field.get(0));
-				} else {
-					fs = this.searchScopeFromList(field.getText());
-					if(fs != null){
-						fieldValue += fs.getScopeName();
-					}
-					//field.setValue(fs.getScopeName());
+			ParsingObject child = node.get(0);
+			if(child.is(MillionTag.TAG_APPLY)){
+				this.formatApplyFuncName(child.get(0));
+				this.formatRightSide(child.get(1));
+				fieldValue += "(!(" + child.get(0).getText() + "(ref(Some(" + child.get(1).getText() + "))))).";
+			} else {
+				fs = this.searchScopeFromList(child.getText());
+				if(fs != null){
+					fieldValue += "(new " + fs.getScopeName() + "()).";
 				}
+				//field.setValue(fs.getScopeName());
 			}
+			this.formatRightSide(node.get(1));
+			fieldValue += node.get(1).getText();
 			ParsingObject nameNode = new ParsingObject(new ParsingTag("Name"), null, 0);
 			nameNode.setValue(fieldValue);
 			node.getParent().insert(this.indexOf(node), nameNode);
@@ -1324,8 +1424,9 @@ public class FSharpGenerator extends SourceGenerator {
 		} else if(node.is(MillionTag.TAG_NAME)){
 			FSharpScope fs;
 			fs = this.searchVarOrFuncFromScopeList(this.currentScope, node.getText());
+			fs = this.currentScope.getAvailableScope(node.getText());
 			if(fs != null){
-				node.setValue(fs.getScopeName() + "." + node.getText());
+				node.setValue("(new " + fs.getScopeName() + "())" + "." + node.getText());
 			}
 		}
 	}
@@ -1338,6 +1439,8 @@ public class FSharpGenerator extends SourceGenerator {
 		}
 		//if(this.checkApplyFuncName(getFieldText(func))){
 		this.formatApplyFuncName(func);
+		this.formatRightSide(arguments);
+		func = node.get(0);
 		boolean asFlag = this.assignFlag;
 		this.assignFlag = true;
 		this.visit(func);
@@ -1371,7 +1474,9 @@ public class FSharpGenerator extends SourceGenerator {
 
 	public void visitIf(ParsingObject node) {
 		String thenBlock;
+		this.assignFlag = true;
 		this.visit(node.get(0), "if (", ")");
+		this.assignFlag = false;
 		this.currentBuilder.appendNewLine("then");
 		int start = this.currentBuilder.getPosition();
 		this.generateBlock(node.get(1));

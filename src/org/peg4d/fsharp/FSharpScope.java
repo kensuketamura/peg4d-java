@@ -11,6 +11,8 @@ public class FSharpScope {
 	public ParsingObject node;
 	public ArrayList<FSharpVar> varList;
 	public ArrayList<FSharpFunc> funcList;
+	public FSharpScope parent;
+	public ArrayList<FSharpScope> children;
 	public int numOfArgs = 0;
 	public boolean recursive = false;
 	public enum ScopeType{
@@ -30,6 +32,7 @@ public class FSharpScope {
 		this.varList = new ArrayList<FSharpVar>();
 		this.funcList = new ArrayList<FSharpFunc>();
 		this.returnList = new ArrayList<ParsingObject>();
+		this.children = new ArrayList<FSharpScope>();
 		this.path = new ArrayList<String>();
 		//deep copy
 		for(int i = 0; i < path.size(); i++){
@@ -106,25 +109,118 @@ public class FSharpScope {
 	}
 	
 	public FSharpVar searchVar(String name){
-		FSharpVar result = null;
 		for(FSharpVar fv : this.varList){
 			if(fv.getTrueName().contentEquals(name)){
-				result = fv;
+				return fv;
 			}
 		}
-		return result;
+		return null;
 	}
 	
 	public FSharpFunc searchFunc(String name){
-		FSharpFunc result = null;
 		for(FSharpFunc ff : this.funcList){
 			if(ff.getTrueName().contentEquals(name)){
-				result = ff;
+				return ff;
 			}
 		}
 		if(this.name.contentEquals(name)){
-			result = new FSharpFunc("ok");
+			return  new FSharpFunc("ok");
 		}
-		return result;
+		return null;
+	}
+	
+	public FSharpVar getAvailableVar(String name){
+		FSharpVar fv = this.searchVar(name);
+		if(fv != null){
+			return fv;
+		}
+		if(this.parent != null){
+			return this.parent.getAvailableVar(name);
+		} else {
+			return null;
+		}
+	}
+	
+	public FSharpFunc getAvailableFunc(String name){
+		FSharpFunc ff = this.searchFunc(name);
+		if(ff != null){
+			return ff;
+		}
+		if(this.parent != null){
+			return this.parent.getAvailableFunc(name);
+		} else {
+			return null;
+		}
+	}
+	
+	public FSharpScope getAvailableScope(String name){
+		for(FSharpScope fs : this.children){
+			if(name.contentEquals(fs.name)){
+				return fs;
+			}
+		}
+		String scopeName;
+		FSharpScope result = null;
+		FSharpScope parent = this.parent;
+		while(parent != null){
+			if(name.contentEquals(parent.name)){
+				return parent;
+			}
+			scopeName = parent.name.split("_")[parent.name.split("_").length - 1];
+			if(name.contentEquals(scopeName)){
+				return parent;
+			}
+			result = parent.getAvailableScope(name);
+			if(result != null){
+				return result;
+			}
+			for(FSharpScope fs : parent.children){
+				if(fs.name.contentEquals(name)){
+					return fs;
+				}
+			}
+			parent = parent.parent;
+		}
+		parent = this.parent;
+		if(parent != null){
+			while(parent.parent != null){
+				parent = parent.parent;
+			}
+			return searchChildren(parent, name);
+		}
+		return searchChildren(this, name);
+	}
+	
+	private FSharpScope searchChildren(FSharpScope parent, String name){
+		if(parent.children != null){
+			for(FSharpScope child : parent.children){
+				if(child.name.contentEquals(name)){
+					return child;
+				}
+				return this.searchChildren(child, name);
+			}	
+		}
+		return null;
+	}
+	
+	public boolean add(FSharpScope child){
+		return this.children.add(child);
+	}
+	
+	public boolean remove(FSharpScope child){
+		return this.children.remove(child);
+	}
+	
+	public FSharpScope remove(int index){
+		return this.children.remove(index);
+	}
+	
+	public boolean isArgumentVar(String name){
+		for(int i = 0; i < this.numOfArgs; i++){
+			if(this.varList.get(i).getTrueName().contentEquals(name)){
+				return true;
+			}
+		}
+		return false;
 	}
 }
