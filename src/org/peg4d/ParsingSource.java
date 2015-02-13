@@ -238,7 +238,7 @@ public abstract class ParsingSource {
 			StringBuilder builder = new StringBuilder();
 			String line = reader.readLine();
 			while(line != null) {
-				if(fileName.contains(".js")) line = line.replace("$", "DOLAR");
+				if(fileName.contains(".js")) line = line.replace("$", "DOLLAR");
 				builder.append(line);
 				builder.append("\n");
 				line = reader.readLine();
